@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -393,6 +394,14 @@ func TestDoctorResolvesProjectThroughSettingsSymlink(t *testing.T) {
 	healthy, err := Doctor(o.DB, dir, &out)
 	if err != nil || !healthy {
 		t.Fatalf("%v %t\n%s", err, healthy, &out)
+	}
+	for _, want := range []string{"ok database: schema 1, writable\n", "ok Claude Code 2.1.295 supports onFailure\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "<nil>") {
+		t.Errorf("passing line prints a nil error:\n%s", &out)
 	}
 }
 

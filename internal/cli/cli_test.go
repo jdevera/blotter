@@ -45,3 +45,15 @@ func TestWrapParseErrorsBlock(t *testing.T) {
 		}
 	}
 }
+func TestBlockedMessageNamesWrapperGuard(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	t.Setenv("BLOTTER_DB", filepath.Join(dir, "blotter.db"))
+	var out, stderr bytes.Buffer
+	// An invalid --harness fails before cobra's parsed --guard is available.
+	code := Run([]string{"wrap", "--harness", "none", "--guard", "mine", "--", "/bin/guard", "--guard", "theirs"}, "test", strings.NewReader("{}"), &out, &stderr)
+	if code != 2 || !strings.HasPrefix(stderr.String(), "BLOCKED: blotter could not run guard mine:") {
+		t.Fatal(code, &stderr)
+	}
+}

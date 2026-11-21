@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestStorageAndQueries(t *testing.T) {
@@ -113,5 +114,15 @@ func TestDiagnosticsLog(t *testing.T) {
 	}
 	if b, _ = os.ReadFile(DiagnosticLogs()[1]); !strings.Contains(string(b), " panic - boom\n") {
 		t.Fatalf("%q", b)
+	}
+}
+func TestTruncationKeepsUTF8(t *testing.T) {
+	h := Hit{Stdout: strings.Repeat("x", CaptureCap-1) + "é and more", Stderr: strings.Repeat("\xff", CaptureCap+1)}
+	h.Prepare("full")
+	if len(h.Stdout) != CaptureCap-1 || !utf8.ValidString(h.Stdout) || !h.Truncated {
+		t.Fatalf("stdout cut to %d bytes, valid=%t", len(h.Stdout), utf8.ValidString(h.Stdout))
+	}
+	if len(h.Stderr) != CaptureCap {
+		t.Fatalf("binary stderr cut to %d bytes", len(h.Stderr))
 	}
 }

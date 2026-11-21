@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite" // Register the pure-Go SQLite database/sql driver.
 )
@@ -251,14 +252,22 @@ func FromEvent(raw []byte) Hit {
 	return h
 }
 
+// clip cuts s to CaptureCap bytes without splitting a UTF-8 sequence.
+func clip(s string) string {
+	cut := CaptureCap
+	for i := 1; i < utf8.UTFMax && !utf8.RuneStart(s[cut]); i++ {
+		cut--
+	}
+	return s[:cut]
+}
 func Hash(text string) string { return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(text))) }
 func (h *Hit) Prepare(privacy string) {
 	if len(h.Stdout) > CaptureCap {
-		h.Stdout = h.Stdout[:CaptureCap]
+		h.Stdout = clip(h.Stdout)
 		h.Truncated = true
 	}
 	if len(h.Stderr) > CaptureCap {
-		h.Stderr = h.Stderr[:CaptureCap]
+		h.Stderr = clip(h.Stderr)
 		h.Truncated = true
 	}
 	if privacy == "hash" {

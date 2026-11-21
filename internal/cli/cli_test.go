@@ -57,3 +57,10 @@ func TestBlockedMessageNamesWrapperGuard(t *testing.T) {
 		t.Fatal(code, &stderr)
 	}
 }
+func TestShowUnknownID(t *testing.T) {
+	t.Setenv("BLOTTER_DB", filepath.Join(t.TempDir(), "blotter.db"))
+	var out, stderr bytes.Buffer
+	if code := Run([]string{"show", "42"}, "test", strings.NewReader(""), &out, &stderr); code != 1 || stderr.String() != "blotter: no hit with id 42\n" {
+		t.Fatal(code, &stderr)
+	}
+}

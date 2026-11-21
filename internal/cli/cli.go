@@ -418,6 +418,9 @@ func (a *app) show() *cobra.Command {
 		}
 		defer func() { _ = s.Close() }()
 		h, err := s.Show(context.Background(), id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("no hit with id %d", id)
+		}
 		if err != nil {
 			return err
 		}

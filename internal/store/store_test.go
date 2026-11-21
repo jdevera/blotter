@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,5 +79,39 @@ func TestSince(t *testing.T) {
 		if _, err := Since(input, now); err == nil {
 			t.Errorf("accepted %s", input)
 		}
+	}
+}
+func TestDiagnosticsLog(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	Diagnostic(KindBackground, "my guard\nname", fmt.Errorf("guard x pipe capture:\nWaitDelay"))
+	Diagnostic(KindCanary, "", fmt.Errorf("canary lookup: locked"))
+	b, err := os.ReadFile(DiagnosticLogs()[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("%q", b)
+	}
+	want := []DiagnosticEntry{{"", KindBackground, "my_guard_name", "guard x pipe capture: WaitDelay"}, {"", KindCanary, "", "canary lookup: locked"}}
+	for i, line := range lines {
+		e, ok := ParseDiagnostic(line)
+		e.TS = ""
+		if !ok || e != want[i] {
+			t.Errorf("%q => %+v", line, e)
+		}
+	}
+	if e, ok := ParseDiagnostic("2026-11-20T00:00:00.000Z guard demo logging: locked"); !ok || e.Kind != KindOther || e.Message != "guard demo logging: locked" {
+		t.Errorf("untagged line: %+v", e)
+	}
+	if err = os.WriteFile(DiagnosticLogs()[1], make([]byte, DiagnosticLogLimit), 0600); err != nil {
+		t.Fatal(err)
+	}
+	Diagnostic(KindPanic, "", fmt.Errorf("boom"))
+	if info, err := os.Stat(DiagnosticLogs()[0]); err != nil || info.Size() != DiagnosticLogLimit {
+		t.Fatal("log not rotated", err)
+	}
+	if b, _ = os.ReadFile(DiagnosticLogs()[1]); !strings.Contains(string(b), " panic - boom\n") {
+		t.Fatalf("%q", b)
 	}
 }

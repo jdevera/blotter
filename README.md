@@ -101,11 +101,15 @@ directory and its descendants: `/repo/a` includes `/repo/a/sub`, and excludes
 `/repo/abc`. It does not resolve project-path symlinks. `--since` accepts positive
 durations (`12h`, `7d`, `2w`) or a UTC date (`2026-11-01`, inclusive midnight).
 
-Doctor checks database writability and schema, recent internal errors, wrapper
-and manifest consistency, program executability, Claude failure policies, Codex
-effective hook configuration/trust, slow logged guards and the newest canary.
-Explicitly disabled Codex hooks are reported without failing the trust check.
-It exits 1 on failed checks. Doctor does not run guard programs. Codex effective
+Doctor checks database writability and schema, wrapper and manifest
+consistency, program executability, Claude failure policies, Codex effective
+hook configuration/trust, slow logged guards and the newest canary. Explicitly
+disabled Codex hooks are reported without failing the trust check. It exits 1
+on failed checks, which describe the current state. Past runtime events from
+the last seven days, such as hits not logged while the database was locked or
+guards leaving background processes, are `info` counts that do not affect the
+verdict. A Claude version that cannot be checked, for example because `claude`
+is not on `PATH`, is a `warn` line; a version known to lack `onFailure` fails. Doctor does not run guard programs. Codex effective
 configuration is inspected through the installed `codex app-server`, without
 starting a model turn; inability to inspect it is reported as a failure.
 
@@ -211,7 +215,8 @@ the explicit flags. This command does not install a policy or execute a guard.
   `~/.local/share/blotter/blotter.db`. `--db` overrides `BLOTTER_DB`, which overrides
   the default. Use absolute paths in persistent environment variables.
 - Diagnostics: `$XDG_STATE_HOME/blotter/errors.log`, default
-  `~/.local/state/blotter/errors.log`. Doctor shows entries from the last seven days.
+  `~/.local/state/blotter/errors.log`. At 1 MiB it rotates to `errors.log.1`,
+  keeping one previous file. Doctor summarizes entries from the last seven days.
 - Backups: `$XDG_DATA_HOME/blotter/backups/<canonical-target-hash>/`. Each snapshot
   retains target, harness, scope, creation time and version metadata. Ten snapshots
   are retained per target.

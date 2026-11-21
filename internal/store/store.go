@@ -43,20 +43,71 @@ func DBPath(override string) string {
 	return filepath.Join(DataDir(), "blotter.db")
 }
 
-func Diagnostic(err error) {
+// Diagnostic kinds let doctor summarize past runtime events.
+const (
+	KindNotLogged   = "not-logged"  // a hit could not be written to the database
+	KindBackground  = "background"  // a guard left a process holding its output
+	KindCapture     = "capture"     // reading guard output failed
+	KindTruncated   = "truncated"   // stored output was cut at CaptureCap
+	KindPassthrough = "passthrough" // forwarding guard output failed
+	KindCanary      = "canary"      // canary lookup failed
+	KindPanic       = "panic"       // blotter recovered from an internal failure
+	KindOther       = "other"       // lines written before kinds existed
+)
+
+var diagnosticKinds = map[string]bool{KindNotLogged: true, KindBackground: true, KindCapture: true, KindTruncated: true, KindPassthrough: true, KindCanary: true, KindPanic: true}
+
+// DiagnosticLogLimit is the size at which errors.log rotates to errors.log.1.
+const DiagnosticLogLimit = 1 << 20
+
+func DiagnosticLogs() []string {
+	p := filepath.Join(StateDir(), "errors.log")
+	return []string{p + ".1", p}
+}
+
+// Diagnostic appends "<ts> <kind> <guard|-> <message>" to errors.log.
+func Diagnostic(kind, guard string, err error) {
 	if err == nil {
 		return
 	}
 	if os.MkdirAll(StateDir(), 0700) != nil {
 		return
 	}
-	f, e := os.OpenFile(filepath.Join(StateDir(), "errors.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	logs := DiagnosticLogs()
+	if info, e := os.Stat(logs[1]); e == nil && info.Size() >= DiagnosticLogLimit {
+		_ = os.Rename(logs[1], logs[0])
+	}
+	f, e := os.OpenFile(logs[1], os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if e != nil {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	msg := strings.NewReplacer("\n", " ", "\r", " ").Replace(err.Error())
-	_, _ = fmt.Fprintf(f, "%s %s\n", Timestamp(time.Now()), msg)
+	if guard == "" {
+		guard = "-"
+	}
+	flat := strings.NewReplacer("\n", " ", "\r", " ")
+	guard = strings.Join(strings.Fields(flat.Replace(guard)), "_")
+	_, _ = fmt.Fprintf(f, "%s %s %s %s\n", Timestamp(time.Now()), kind, guard, flat.Replace(err.Error()))
+}
+
+type DiagnosticEntry struct{ TS, Kind, Guard, Message string }
+
+// ParseDiagnostic reads one errors.log line. Lines without a known kind are
+// reported whole as KindOther.
+func ParseDiagnostic(line string) (DiagnosticEntry, bool) {
+	ts, rest, found := strings.Cut(line, " ")
+	if !found {
+		return DiagnosticEntry{}, false
+	}
+	if kind, tail, ok := strings.Cut(rest, " "); ok && diagnosticKinds[kind] {
+		if guard, msg, ok := strings.Cut(tail, " "); ok {
+			if guard == "-" {
+				guard = ""
+			}
+			return DiagnosticEntry{ts, kind, guard, msg}, true
+		}
+	}
+	return DiagnosticEntry{ts, KindOther, "", rest}, true
 }
 
 type Store struct{ DB *sql.DB }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -61,7 +62,7 @@ func Run(args []string, version string, in io.Reader, out, stderr io.Writer) (co
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			store.Diagnostic(fmt.Errorf("recovered panic: %v", p))
+			store.Diagnostic(store.KindPanic, guardName, fmt.Errorf("recovered panic: %v", p))
 			code = 1
 			if wrapping {
 				_, _ = fmt.Fprintf(stderr, "BLOCKED: blotter could not run guard %s: internal failure\n", guardName)
@@ -192,17 +193,21 @@ func (a *app) passthrough(result guard.Result, h store.Hit, logs map[string]bool
 	err = statusError(result.RC)
 	defer func() {
 		if p := recover(); p != nil {
-			store.Diagnostic(fmt.Errorf("finalizing guard %s: recovered panic: %v", h.Guard, p))
+			store.Diagnostic(store.KindPanic, h.Guard, fmt.Errorf("finalizing guard %s: recovered panic: %v", h.Guard, p))
 		}
 	}()
 	if _, err := a.out.Write(result.Stdout); err != nil {
-		store.Diagnostic(fmt.Errorf("guard %s stdout passthrough: %w", h.Guard, err))
+		store.Diagnostic(store.KindPassthrough, h.Guard, fmt.Errorf("guard %s stdout passthrough: %w", h.Guard, err))
 	}
 	if _, err := a.err.Write(result.Stderr); err != nil {
-		store.Diagnostic(fmt.Errorf("guard %s stderr passthrough: %w", h.Guard, err))
+		store.Diagnostic(store.KindPassthrough, h.Guard, fmt.Errorf("guard %s stderr passthrough: %w", h.Guard, err))
 	}
 	if result.CaptureErr != nil {
-		store.Diagnostic(fmt.Errorf("guard %s pipe capture: %w", h.Guard, result.CaptureErr))
+		kind := store.KindCapture
+		if errors.Is(result.CaptureErr, exec.ErrWaitDelay) {
+			kind = store.KindBackground
+		}
+		store.Diagnostic(kind, h.Guard, fmt.Errorf("guard %s pipe capture: %w", h.Guard, result.CaptureErr))
 	}
 	h.RC = result.RC
 	h.Outcome = guard.Classify(h.Harness, result.RC, result.Stdout)
@@ -217,12 +222,12 @@ func (a *app) passthrough(result guard.Result, h store.Hit, logs map[string]bool
 func (a *app) logHit(h store.Hit, privacy string) {
 	defer func() {
 		if p := recover(); p != nil {
-			store.Diagnostic(fmt.Errorf("logging panic for guard %s: %v", h.Guard, p))
+			store.Diagnostic(store.KindPanic, h.Guard, fmt.Errorf("logging panic for guard %s: %v", h.Guard, p))
 		}
 	}()
 	h.Prepare(privacy)
 	if h.Truncated {
-		store.Diagnostic(fmt.Errorf("guard %s capture truncated at %d bytes per stored stream", h.Guard, store.CaptureCap))
+		store.Diagnostic(store.KindTruncated, h.Guard, fmt.Errorf("guard %s capture truncated at %d bytes per stored stream", h.Guard, store.CaptureCap))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
@@ -232,7 +237,7 @@ func (a *app) logHit(h store.Hit, privacy string) {
 		err = s.Insert(ctx, h)
 	}
 	if err != nil {
-		store.Diagnostic(fmt.Errorf("guard %s logging: %w", h.Guard, err))
+		store.Diagnostic(store.KindNotLogged, h.Guard, fmt.Errorf("guard %s logging: %w", h.Guard, err))
 	}
 }
 
@@ -243,14 +248,14 @@ func (a *app) findCanary(input []byte) string {
 	defer cancel()
 	s, err := store.Open(ctx, store.DBPath(a.db))
 	if err != nil {
-		store.Diagnostic(fmt.Errorf("canary lookup: %w", err))
+		store.Diagnostic(store.KindCanary, "", fmt.Errorf("canary lookup: %w", err))
 		return ""
 	}
 	defer func() { _ = s.Close() }()
 	for _, t := range tokenRE.FindAll(input, -1) {
 		known, err := s.KnownCanary(ctx, string(t))
 		if err != nil {
-			store.Diagnostic(fmt.Errorf("canary lookup: %w", err))
+			store.Diagnostic(store.KindCanary, "", fmt.Errorf("canary lookup: %w", err))
 			return ""
 		}
 		if known {

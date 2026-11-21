@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,35 +54,7 @@ func Doctor(dbPath, dir string, out io.Writer) (bool, error) {
 	} else if !errors.Is(e, os.ErrNotExist) {
 		check(false, "installation journal: %v", e)
 	}
-	log, err := os.Open(filepath.Join(store.StateDir(), "errors.log"))
-	recent := 0
-	if err == nil {
-		defer func() { _ = log.Close() }()
-		scan := bufio.NewScanner(log)
-		scan.Buffer(make([]byte, 4096), 1<<20)
-		cutoff := store.Timestamp(time.Now().AddDate(0, 0, -7))
-		for scan.Scan() {
-			line := scan.Text()
-			ts, _, found := strings.Cut(line, " ")
-			if !found {
-				check(false, "malformed diagnostic: %s", line)
-				recent++
-				continue
-			}
-			if ts >= cutoff {
-				check(false, "diagnostic: %s", line)
-				recent++
-			}
-		}
-		if e := scan.Err(); e != nil {
-			check(false, "diagnostics: %v", e)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		check(false, "diagnostics: %v", err)
-	}
-	if recent == 0 {
-		check(true, "no blotter errors in the last 7 days")
-	}
+	summarizeDiagnostics(out, check)
 	all := []Manifest{}
 	if s != nil {
 		all, err = manifests(s.DB)
@@ -172,11 +145,16 @@ func Doctor(dbPath, dir string, out io.Writer) (bool, error) {
 			}
 			if o.Harness == "claude" {
 				if !claudeChecked {
-					if v, e := claudeVersion(); e != nil {
+					v, e := claudeVersion()
+					switch {
+					case errors.Is(e, errClaudeUnverified):
+						// Doctor often runs without the user's PATH; only a known old version fails.
+						_, _ = fmt.Fprintf(out, "warn Claude onFailure support: %v\n", e)
+					case e != nil:
 						check(false, "Claude onFailure support: %v", e)
-					} else if v == "" {
+					case v == "":
 						check(true, "Claude version not checked as root")
-					} else {
+					default:
 						check(true, "Claude Code %s supports onFailure", v)
 					}
 					claudeChecked = true
@@ -288,4 +266,97 @@ func executable(program string) error {
 		return fmt.Errorf("not executable")
 	}
 	return nil
+}
+
+// summarizeDiagnostics reports the last seven days of errors.log as counts.
+// They are past runtime events, not the current state, so they never fail
+// doctor; the checks above cover what is broken now.
+func summarizeDiagnostics(out io.Writer, check func(bool, string, ...any)) {
+	type group struct {
+		kind, guard, latest string
+		count               int
+	}
+	perGuard := map[string]bool{store.KindBackground: true, store.KindTruncated: true, store.KindPassthrough: true, store.KindCapture: true}
+	groups := map[[2]string]*group{}
+	cutoff := store.Timestamp(time.Now().AddDate(0, 0, -7))
+	for _, path := range store.DiagnosticLogs() {
+		f, err := os.Open(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			check(false, "diagnostics: %v", err)
+			continue
+		}
+		scan := bufio.NewScanner(f)
+		scan.Buffer(make([]byte, 4096), 1<<20)
+		for scan.Scan() {
+			e, ok := store.ParseDiagnostic(scan.Text())
+			if !ok || e.TS < cutoff {
+				continue
+			}
+			key := [2]string{e.Kind, ""}
+			if perGuard[e.Kind] {
+				key[1] = e.Guard
+			}
+			g := groups[key]
+			if g == nil {
+				g = &group{kind: key[0], guard: key[1]}
+				groups[key] = g
+			}
+			g.count++
+			g.latest = e.Message
+		}
+		if err = scan.Err(); err != nil {
+			check(false, "diagnostics: %v", err)
+		}
+		_ = f.Close()
+	}
+	if len(groups) == 0 {
+		check(true, "no blotter errors in the last 7 days")
+		return
+	}
+	keys := make([][2]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i][0] < keys[j][0] || (keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1])
+	})
+	for _, k := range keys {
+		g := groups[k]
+		var text string
+		latest := "; latest: " + g.latest
+		switch g.kind {
+		case store.KindNotLogged:
+			text = fmt.Sprintf("%s not logged", count(g.count, "hit"))
+		case store.KindBackground:
+			text, latest = fmt.Sprintf("guard %s left a background process holding its output %s", g.guard, times(g.count)), ""
+		case store.KindTruncated:
+			text, latest = fmt.Sprintf("guard %s output exceeded the %d KiB storage cap %s", g.guard, store.CaptureCap>>10, times(g.count)), ""
+		case store.KindPassthrough:
+			text = fmt.Sprintf("guard %s output could not be forwarded %s", g.guard, times(g.count))
+		case store.KindCapture:
+			text = fmt.Sprintf("guard %s output could not be read %s", g.guard, times(g.count))
+		case store.KindCanary:
+			text = fmt.Sprintf("canary lookup failed %s", times(g.count))
+		case store.KindPanic:
+			text = fmt.Sprintf("blotter recovered from %s", count(g.count, "internal failure"))
+		default:
+			text = count(g.count, "other diagnostic")
+		}
+		_, _ = fmt.Fprintf(out, "info %s in the last 7 days%s\n", text, latest)
+	}
+}
+func count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+func times(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", n)
 }

@@ -36,7 +36,8 @@ blotter install codex --scope user
 Installation wraps every PreToolUse command handler in the selected file. Each
 handler is printed with its derived guard name. Non-command handlers and other
 events are preserved. Existing wrappers are skipped; stale blotter binary paths
-are repaired. Homebrew installations use the stable `opt/blotter/bin/blotter`
+are repaired. Install warns when its options differ from an existing wrapper's
+and leaves it unchanged; uninstall and install again to change them. Homebrew installations use the stable `opt/blotter/bin/blotter`
 path so a brew upgrade does not invalidate hooks.
 
 **Claude changes failure behavior:** blotter adds `onFailure: "block"`. A wrapped

@@ -257,6 +257,8 @@ uninstall restores the original JSON file byte for byte, including unknown
 fields, field order, indentation and its trailing newline. Settings symlinks
 remain symlinks.
 
+For uninstall, `--only` matches guard names rather than commands.
+
 `--restore` replaces the exact target with its newest backup, including other
 settings in that snapshot. Review the dry-run diff first. Unlike normal uninstall,
 this explicit recovery operation restores the whole backed-up file.

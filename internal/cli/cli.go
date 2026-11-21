@@ -554,11 +554,12 @@ func (a *app) installCommand(uninstall bool) *cobra.Command {
 	f := c.Flags()
 	f.StringVar(&o.Scope, "scope", "user", "user, project or local")
 	f.StringVar(&o.Dir, "dir", ".", "project directory")
-	f.StringArrayVar(&o.Only, "only", nil, "match command substring (repeatable)")
 	f.BoolVar(&o.DryRun, "dry-run", false, "print diffs without writing")
 	if uninstall {
+		f.StringArrayVar(&o.Only, "only", nil, "match guard name substring (repeatable)")
 		f.BoolVar(&o.Restore, "restore", false, "restore newest backup of this exact target")
 	} else {
+		f.StringArrayVar(&o.Only, "only", nil, "match command substring (repeatable)")
 		f.StringArrayVar(&o.Except, "except", nil, "exclude command substring (repeatable)")
 		f.StringArrayVar(&o.FailOpen, "fail-open", nil, "wrap without adding onFailure block (repeatable)")
 		f.StringVar(&o.Guard, "guard", "", "override name for a single --only match")

@@ -366,6 +366,14 @@ func TestBackupRetentionAndRestore(t *testing.T) {
 }
 func TestDoctorResolvesProjectThroughSettingsSymlink(t *testing.T) {
 	dir, o := isolated(t)
+	bin := filepath.Join(dir, "testbin")
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nprintf '2.1.295 (Claude Code)\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	program := filepath.Join(dir, "hooks", "guard.sh")
 	os.MkdirAll(filepath.Dir(program), 0700)
 	os.WriteFile(program, []byte("#!/bin/sh\nexit 0\n"), 0700)

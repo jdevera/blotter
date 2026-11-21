@@ -530,7 +530,7 @@ func Apply(o Options) error {
 	}
 	if changed && o.Harness == "claude" {
 		_, _ = fmt.Fprintln(o.Out, "Claude onFailure=block stops tool calls when a wrapped guard breaks or times out, except explicit fail-open handlers")
-		if err := claudeVersion(); err != nil {
+		if _, err := claudeVersion(); err != nil {
 			_, _ = fmt.Fprintf(o.Out, "warning: %v\n", err)
 		}
 	}
@@ -673,19 +673,21 @@ func uninstall(o Options, settings, config change, handlers []handler, all []Man
 
 var versionRE = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
-func claudeVersion() error {
+// claudeVersion returns the installed Claude Code version when it supports
+// onFailure, or an empty version when running as root skips the check.
+func claudeVersion() (string, error) {
 	if os.Geteuid() == 0 {
-		return nil
+		return "", nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "claude", "--version").Output()
 	if err != nil {
-		return fmt.Errorf("could not verify Claude version: %w", err)
+		return "", fmt.Errorf("could not verify Claude version: %w", err)
 	}
 	m := versionRE.FindStringSubmatch(string(out))
 	if len(m) != 4 {
-		return fmt.Errorf("unrecognized Claude version")
+		return "", fmt.Errorf("unrecognized Claude version")
 	}
 	v := []int{}
 	for _, p := range m[1:] {
@@ -693,7 +695,7 @@ func claudeVersion() error {
 		v = append(v, n)
 	}
 	if v[0] < 2 || (v[0] == 2 && (v[1] < 1 || (v[1] == 1 && v[2] < 295))) {
-		return fmt.Errorf("claude %s predates 2.1.295; onFailure block is unsupported", m[0])
+		return "", fmt.Errorf("claude %s predates 2.1.295; onFailure block is unsupported", m[0])
 	}
-	return nil
+	return m[0], nil
 }

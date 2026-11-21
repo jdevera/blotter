@@ -42,7 +42,11 @@ func Doctor(dbPath, dir string, out io.Writer) (bool, error) {
 			_, e = tx.Exec("CREATE TABLE IF NOT EXISTS doctor_probe(id INTEGER)")
 			_ = tx.Rollback()
 		}
-		check(e == nil, "database schema %d and writability: %v", store.SchemaVersion, e)
+		if e != nil {
+			check(false, "database writability: %v", e)
+		} else {
+			check(true, "database: schema %d, writable", store.SchemaVersion)
+		}
 	}
 	if _, e := os.Stat(journalPath()); e == nil {
 		check(false, "interrupted installation pending; rerun install/uninstall to recover it")
@@ -167,8 +171,13 @@ func Doctor(dbPath, dir string, out io.Writer) (bool, error) {
 			}
 			if o.Harness == "claude" {
 				if !claudeChecked {
-					e := claudeVersion()
-					check(e == nil, "Claude onFailure support: %v", e)
+					if v, e := claudeVersion(); e != nil {
+						check(false, "Claude onFailure support: %v", e)
+					} else if v == "" {
+						check(true, "Claude version not checked as root")
+					} else {
+						check(true, "Claude Code %s supports onFailure", v)
+					}
 					claudeChecked = true
 				}
 				exempt := idx >= 0 && all[idx].FailOpen

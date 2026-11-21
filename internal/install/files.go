@@ -407,14 +407,17 @@ func recoverPending() error {
 	}
 	return os.Remove(journalPath())
 }
-func commitChanges(changes []change, all []Manifest, o Options) error {
+
+// commitChanges writes the changed files and, with them or alone when only
+// positions moved, the manifests.
+func commitChanges(changes []change, all []Manifest, manifestsChanged bool, o Options) error {
 	active := []change{}
 	for _, c := range changes {
 		if !bytes.Equal(c.Before, c.After) {
 			active = append(active, c)
 		}
 	}
-	if len(active) == 0 {
+	if len(active) == 0 && !manifestsChanged {
 		return nil
 	}
 	s, err := store.Open(context.Background(), o.DB)
@@ -422,6 +425,17 @@ func commitChanges(changes []change, all []Manifest, o Options) error {
 		return err
 	}
 	defer func() { _ = s.Close() }()
+	if len(active) == 0 {
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err = saveManifests(tx, all); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if _, err = s.DB.Exec("CREATE TABLE IF NOT EXISTS install_operations(id TEXT PRIMARY KEY)"); err != nil {
 		return err
 	}

@@ -241,9 +241,12 @@ blotter backups list
 blotter uninstall claude --scope project --restore
 ```
 
-Uninstall restores a handler only when its current raw JSON exactly matches the
-manifest's wrapped JSON. An edited handler or a wrapper without a manifest is
-reported and left alone. With no intervening changes, install followed by
+Uninstall restores a handler only when its current JSON is equivalent to the
+manifest's wrapped JSON; formatting and key order do not matter. Wrappers are
+found wherever they now sit in the file, so adding, removing or reordering
+other hooks is safe. An edited handler or a wrapper without a manifest is
+reported and left alone. A moved Codex wrapper needs approval again in
+`/hooks`, because Codex trust keys include the hook's position. With no intervening changes, install followed by
 uninstall restores the original JSON file byte for byte, including unknown
 fields, field order, indentation and its trailing newline. Settings symlinks
 remain symlinks.

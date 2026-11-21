@@ -128,6 +128,7 @@ func Doctor(dbPath, dir string, out io.Writer) (bool, error) {
 			check(false, "%s: %v", p, e)
 			continue
 		}
+		relink(all, c.Path, p, handlers)
 		for _, h := range handlers {
 			args, wrapped := wrappedArgs(h, o.Harness)
 			if !wrapped {

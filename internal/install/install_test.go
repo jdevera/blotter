@@ -328,7 +328,7 @@ func TestCompareBeforeWriteAndRollback(t *testing.T) {
 	if err = os.WriteFile(second.Path, []byte("other edit"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = commitChanges([]change{first, second}, nil, o); err == nil {
+	if err = commitChanges([]change{first, second}, nil, true, o); err == nil {
 		t.Fatal("expected second-file concurrency failure")
 	}
 	if b, _ := os.ReadFile(path); string(b) != vaultSettings {
@@ -477,5 +477,120 @@ func TestInstallFollowsHandlerLayout(t *testing.T) {
 	}
 	if restored, _ := os.ReadFile(p); string(restored) != settings {
 		t.Fatalf("round trip changed bytes:\n%s", restored)
+	}
+}
+
+func TestManifestsFollowMovedHandlers(t *testing.T) {
+	dir, o := isolated(t)
+	p := writeSettings(t, dir)
+	o.Binary = filepath.Join(dir, "blotter")
+	if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	o.Only = []string{"block-sed"}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	wrapped, _ := os.ReadFile(p)
+	// A new group above shifts the wrapped handler from group 1 to group 2 and
+	// puts an unwrapped handler at its old position.
+	const added = `{"matcher": "Edit", "hooks": [{"type":"command", "command":"./new-guard.sh"}]},
+      {"matcher": "Bash", "hooks": [{"type":"command", "command":"./other.sh"}]},
+      `
+	insert := func(b []byte) []byte {
+		return bytes.Replace(b, []byte(`{"matcher": "Bash", "hooks": [`), []byte(added+`{"matcher": "Bash", "hooks": [`), 1)
+	}
+	if err := os.WriteFile(p, insert(wrapped), 0600); err != nil {
+		t.Fatal(err)
+	}
+	o.Only = nil
+	out := &bytes.Buffer{}
+	o.Out = out
+	if err := Apply(o); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "block-sed moved within") || !strings.Contains(out.String(), "wrapped other") {
+		t.Fatal(out)
+	}
+	all, err := readManifests(o.DB)
+	if err != nil || len(all) != 5 {
+		t.Fatalf("%d manifests, %v", len(all), err)
+	}
+	o.Uninstall = true
+	if err = Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	if restored, _ := os.ReadFile(p); string(restored) != string(insert([]byte(vaultSettings))) {
+		t.Fatalf("uninstall did not restore every handler:\n%s", restored)
+	}
+}
+func TestStaleManifestIsReplaced(t *testing.T) {
+	dir, o := isolated(t)
+	p := writeSettings(t, dir)
+	o.Binary = filepath.Join(dir, "blotter")
+	if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	// Replacing a wrapped handler by hand leaves its manifest without a wrapper.
+	raw, _ := os.ReadFile(p)
+	hs, _ := discover(raw)
+	replaced := bytes.Replace(raw, []byte(hs[1].Raw), []byte(`{"type":"command","command":"./replacement.sh"}`), 1)
+	if err := os.WriteFile(p, replaced, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	o.Out = out
+	if err := Apply(o); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "dropped stale manifest block-sed") || !strings.Contains(out.String(), "wrapped replacement") {
+		t.Fatal(out)
+	}
+	all, err := readManifests(o.DB)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("%d manifests, %v", len(all), err)
+	}
+}
+func TestManifestsSurviveReformatting(t *testing.T) {
+	dir, o := isolated(t)
+	p := writeSettings(t, dir)
+	o.Binary = filepath.Join(dir, "blotter")
+	if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	// Tools that rewrite settings change whitespace and key order; this also
+	// moves every handler down by one group.
+	raw, _ := os.ReadFile(p)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	hooks := doc["hooks"].(map[string]any)
+	hooks["PreToolUse"] = append([]any{map[string]any{"matcher": "Edit", "hooks": []any{map[string]any{"type": "command", "command": "./new.sh"}}}}, hooks["PreToolUse"].([]any)...)
+	rewritten, _ := json.MarshalIndent(doc, "", "    ")
+	if err := os.WriteFile(p, rewritten, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	o.Out = out
+	o.Uninstall = true
+	if err := Apply(o); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Count(out.String(), "restored ") != 3 {
+		t.Fatalf("not every handler restored:\n%s", out)
+	}
+	after, _ := os.ReadFile(p)
+	if bytes.Contains(after, []byte(`"wrap"`)) {
+		t.Fatalf("wrapper left behind:\n%s", after)
+	}
+	if all, err := readManifests(o.DB); err != nil || len(all) != 0 {
+		t.Fatal(len(all), err)
 	}
 }

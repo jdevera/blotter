@@ -53,6 +53,9 @@ func Run(args []string, version string, in io.Reader, out, stderr io.Writer) (co
 	}
 	guardName := "<unknown>"
 	for i, arg := range args {
+		if arg == "--" {
+			break // the guard's own arguments follow
+		}
 		if arg == "--guard" && i+1 < len(args) {
 			guardName = args[i+1]
 		}

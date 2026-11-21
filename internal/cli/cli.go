@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -102,6 +104,10 @@ func (a *app) wrap() *cobra.Command {
 	var harness, name, shell, log, privacy string
 	var shellWords bool
 	c := &cobra.Command{Use: "wrap [flags] -- program [args...]", Short: "Run a guard and preserve its output and exit status", RunE: func(c *cobra.Command, args []string) error {
+		// A harness that stops reading must not kill blotter before it logs the
+		// hit: with SIGPIPE handled, writes return EPIPE instead. Unlike an
+		// ignored signal, a handled one is reset to default for the guard.
+		signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
 		if harness != "claude" && harness != "codex" {
 			return fmt.Errorf("--harness must be claude or codex")
 		}

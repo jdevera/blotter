@@ -508,3 +508,31 @@ func TestInstalledCommandsUsePositionalArguments(t *testing.T) {
 		}
 	}
 }
+func TestClosedOutputStillLogs(t *testing.T) {
+	env, db := testEnv(t)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	defer w.Close()
+	// The guard first checks that it did not inherit an ignored SIGPIPE: with
+	// it ignored, yes reports a broken pipe instead of dying silently.
+	probe := filepath.Join(t.TempDir(), "yes.err")
+	cmd := exec.Command(testBinary, wrapArgs("claude", "--sh", "yes 2>"+probe+" | head -c1 >/dev/null; cat "+probe+"; echo denied >&2; exit 2")...)
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"x"}}`)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = w
+	err = cmd.Run()
+	if e, ok := err.(*exec.ExitError); !ok || e.ExitCode() != 2 {
+		t.Fatalf("want exit 2, got %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("guard inherited a SIGPIPE disposition: %q", &out)
+	}
+	if hits := allHits(t, db); len(hits) != 1 || hits[0].Outcome != "block" {
+		t.Fatalf("%+v", hits)
+	}
+}

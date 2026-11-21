@@ -1,0 +1,42 @@
+version: 2
+
+builds:
+  - id: blotter
+    main: .
+    binary: blotter
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "blotter_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+
+brews:
+  - name: blotter
+    repository:
+      owner: jdevera
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/jdevera/blotter
+    description: Records agent guard blocks and failures in local SQLite
+    license: MIT
+    install: |
+      bin.install "blotter"
+    test: |
+      system "#{bin}/blotter", "--version"

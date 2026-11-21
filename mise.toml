@@ -1,0 +1,36 @@
+[tools]
+go = "1.26.3"
+golangci-lint = "2.11.4"
+goreleaser = "2.15.0"
+
+[tasks.build]
+description = "Build the blotter binary"
+run = "go build -o dist/blotter ."
+
+[tasks.test]
+description = "Run unit, integration and local Codex compatibility tests"
+run = "go test ./..."
+
+[tasks."test:race"]
+description = "Check concurrent execution paths"
+run = "go test -race ./..."
+
+[tasks.bench]
+description = "Measure wrap overhead"
+run = "go test -run TestWrapMedianOverhead -bench BenchmarkWrapPass -benchmem -v ."
+
+[tasks.lint]
+description = "Run static checks"
+run = "golangci-lint run ./..."
+
+[tasks.fmt]
+description = "Format Go source"
+run = "gofmt -w main.go integration_test.go internal"
+
+[tasks."release:check"]
+description = "Validate release configuration"
+run = "goreleaser check"
+
+[tasks."codex:fixtures"]
+description = "Regenerate hashes using codex-cli 0.171.0"
+run = "python3 scripts/generate-codex-fixtures.py"

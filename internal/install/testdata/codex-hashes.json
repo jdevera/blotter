@@ -1,0 +1,92 @@
+{
+  "producer": "codex-cli 0.171.0",
+  "source_tag": "rust-v0.171.0",
+  "symlink_path_preserved": true,
+  "cases": [
+    {
+      "name": "absent-matcher",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes"
+      },
+      "hash": "sha256:4798995e10927fb14d24971dcf0065ee3d36f447b6b95fafd5c959d9bed8806a"
+    },
+    {
+      "name": "empty-matcher",
+      "matcher": "",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes"
+      },
+      "hash": "sha256:35fb24b6a3e2f9de28f3f21138bd35f1e114de8163919c7180ffbbcea91f40e7"
+    },
+    {
+      "name": "status",
+      "matcher": "Bash",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "statusMessage": "check <&> café "
+      },
+      "hash": "sha256:08e120febef6ffdc1e169230c33806594abb8e950f6ed001d8c5834613bafb6f"
+    },
+    {
+      "name": "custom-limit",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "additionalContextLimit": 20000
+      },
+      "hash": "sha256:1b35e4770e7abcc42eaae7f2faa112a5feb328ed8109f74351438cb7cbc72bda"
+    },
+    {
+      "name": "default-limit",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "additionalContextLimit": 2500
+      },
+      "hash": "sha256:4798995e10927fb14d24971dcf0065ee3d36f447b6b95fafd5c959d9bed8806a"
+    },
+    {
+      "name": "zero-limit",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "additionalContextLimit": 0
+      },
+      "hash": "sha256:56076d1a8e9c17ace1c59e2a27ea81e033ef0ba195df62f3ff45bedc8a7329a7"
+    },
+    {
+      "name": "async",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "async": true
+      },
+      "hash": "sha256:2964167206b9dc45a72e7d6cf7a738a0c184988faa70a9920d634a6058a19eed"
+    },
+    {
+      "name": "zero-timeout",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo yes",
+        "timeout": 0
+      },
+      "hash": "sha256:1e61fc0b03632c3ce288570f34feacf0b820daa084c68321d37a10c8d89e4a74"
+    },
+    {
+      "name": "combined",
+      "matcher": "",
+      "handler": {
+        "type": "command",
+        "command": "/bin/echo 'a b'",
+        "async": true,
+        "timeout": 9,
+        "statusMessage": "checking",
+        "additionalContextLimit": 0
+      },
+      "hash": "sha256:e8be22d5ce3d341ce58b6fdf4c7366aa626c51d15ffba9edf80af1f6cf9eee16"
+    }
+  ]
+}

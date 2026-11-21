@@ -2,11 +2,13 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -360,8 +362,27 @@ func Apply(o Options) error {
 	if err != nil {
 		return err
 	}
+	lexical, err := filepath.Abs(target)
+	if err != nil {
+		return err
+	}
+	before := map[int][2]int{}
+	for i, m := range all {
+		before[i] = [2]int{m.GroupIndex, m.HandlerIndex}
+	}
+	moved := relink(all, settings.Path, lexical, handlers)
+	for _, i := range moved {
+		if before[i] == [2]int{all[i].GroupIndex, all[i].HandlerIndex} {
+			_, _ = fmt.Fprintf(o.Out, "%s was reformatted; manifest updated\n", all[i].Guard)
+			continue
+		}
+		_, _ = fmt.Fprintf(o.Out, "%s moved within %s; manifest updated\n", all[i].Guard, settings.Path)
+		if all[i].TrustKey != "" {
+			_, _ = fmt.Fprintf(o.Out, "%s: approve this wrapped hook again in Codex /hooks (trust keys include the position)\n", all[i].Guard)
+		}
+	}
 	if o.Uninstall {
-		return uninstall(o, settings, config, handlers, all)
+		return uninstall(o, settings, config, handlers, all, len(moved) > 0)
 	}
 	binary, err := BinaryPath(o.Binary)
 	if err != nil {
@@ -446,6 +467,11 @@ func Apply(o Options) error {
 			_, _ = fmt.Fprintf(o.Out, "updated blotter path for %s\n", all[idx].Guard)
 			continue
 		}
+		if j := manifestIndex(all, settings.Path, h); j >= 0 {
+			// An unwrapped handler holds this position, so the manifest's wrapper is gone.
+			_, _ = fmt.Fprintf(o.Out, "dropped stale manifest %s: its wrapped handler is no longer in %s\n", all[j].Guard, settings.Path)
+			all = append(all[:j], all[j+1:]...)
+		}
 		var words []string
 		if o.Harness == "claude" && h.result().Get("args").Exists() {
 			words = []string{h.Command}
@@ -474,10 +500,6 @@ func Apply(o Options) error {
 		m := Manifest{Harness: o.Harness, Scope: o.Scope, Target: settings.Path, Event: "PreToolUse", GroupIndex: h.Group, HandlerIndex: h.Index, Guard: name, Original: h.Raw, Wrapped: next, InstalledAt: store.Timestamp(time.Now()), Version: o.Version, FailOpen: o.NoFailClosed || match(h.Command, o.FailOpen)}
 		m.SourceTarget, _ = filepath.Abs(target)
 		if o.Harness == "codex" {
-			lexical, err := filepath.Abs(target)
-			if err != nil {
-				return err
-			}
 			m.TrustKey = trustKey(lexical, h)
 			oldHash, e := CodexHash(h.Matcher, h.Raw)
 			if e != nil {
@@ -535,11 +557,71 @@ func Apply(o Options) error {
 			return err
 		}
 	}
-	if o.DryRun || !changed {
+	if o.DryRun || (!changed && len(moved) == 0) {
 		return nil
 	}
-	return commitChanges(changes, all, o)
+	return commitChanges(changes, all, true, o)
 }
+
+// relink points manifests at the handlers that still carry their wrapped JSON
+// after hooks were added, removed, reordered or reformatted around them, and
+// records each wrapper's current text. Equivalence ignores formatting and key
+// order. It returns the indexes of manifests it updated. Codex trust keys
+// include the position, so a moved Codex wrapper has no carried trust.
+func relink(all []Manifest, target, lexical string, handlers []handler) []int {
+	claimed := map[[2]int]bool{}
+	updated := []int{}
+	pending := []int{}
+	for i, m := range all {
+		if m.Target != target {
+			continue
+		}
+		matched := false
+		for _, h := range handlers {
+			if h.Group == m.GroupIndex && h.Index == m.HandlerIndex && equivalentJSON(h.Raw, m.Wrapped) {
+				claimed[[2]int{h.Group, h.Index}] = true
+				if h.Raw != m.Wrapped {
+					all[i].Wrapped = h.Raw
+					updated = append(updated, i)
+				}
+				matched = true
+			}
+		}
+		if !matched {
+			pending = append(pending, i)
+		}
+	}
+	for _, i := range pending {
+		for _, h := range handlers {
+			pos := [2]int{h.Group, h.Index}
+			if claimed[pos] || !equivalentJSON(h.Raw, all[i].Wrapped) {
+				continue
+			}
+			claimed[pos] = true
+			all[i].GroupIndex, all[i].HandlerIndex, all[i].Wrapped = h.Group, h.Index, h.Raw
+			if all[i].TrustKey != "" {
+				all[i].TrustKey = trustKey(lexical, h)
+				all[i].PriorTrust = nil
+			}
+			updated = append(updated, i)
+			break
+		}
+	}
+	return updated
+}
+
+func equivalentJSON(a, b string) bool {
+	decode := func(s string) (any, bool) {
+		d := json.NewDecoder(strings.NewReader(s))
+		d.UseNumber()
+		var v any
+		return v, d.Decode(&v) == nil
+	}
+	x, okA := decode(a)
+	y, okB := decode(b)
+	return okA && okB && reflect.DeepEqual(x, y)
+}
+
 func manifestIndex(all []Manifest, target string, h handler) int {
 	for i, m := range all {
 		if m.Target == target && m.Event == "PreToolUse" && m.GroupIndex == h.Group && m.HandlerIndex == h.Index {
@@ -585,7 +667,7 @@ func argValue(args []string, key string) string {
 func hasShellWords(args []string) bool {
 	return argValue(args, "--shell-words") == "true"
 }
-func uninstall(o Options, settings, config change, handlers []handler, all []Manifest) error {
+func uninstall(o Options, settings, config change, handlers []handler, all []Manifest, moved bool) error {
 	if o.Restore {
 		var err error
 		settings.After, err = newestBackup(settings.Path)
@@ -664,7 +746,7 @@ func uninstall(o Options, settings, config change, handlers []handler, all []Man
 	if o.DryRun {
 		return nil
 	}
-	return commitChanges(changes, next, o)
+	return commitChanges(changes, next, moved || len(remove) > 0, o)
 }
 
 var versionRE = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)

@@ -271,6 +271,30 @@ func prepareWrapped(h handler, o Options, binary, name string) (string, bool, er
 	next, err := editObject(h.Raw, set, remove...)
 	return next, shell, err
 }
+
+// warnChangedOptions reports an installed wrapper that differs from the one
+// these options would produce. Install never rewrites a wrapper for new
+// options, so a later run with fewer flags cannot silently undo earlier ones.
+func warnChangedOptions(o Options, h handler, m Manifest, args []string, binary string) error {
+	original := handler{Group: h.Group, Index: h.Index, Position: h.Position, Path: h.Path, Command: gjson.Get(m.Original, "command").String(), Raw: m.Original, Matcher: h.Matcher}
+	want, _, err := prepareWrapped(original, o, binary, m.Guard)
+	if err != nil {
+		return err
+	}
+	// Only the blotter path may differ; install updates it separately.
+	command := binary
+	if o.Harness == "codex" {
+		command = guard.ShellJoin(append([]string{binary}, args[1:]...))
+	}
+	current, err := editObject(h.Raw, []member{{"command", command}})
+	if err != nil {
+		return err
+	}
+	if !equivalentJSON(want, current) {
+		_, _ = fmt.Fprintf(o.Out, "warning: %s is wrapped with different options; uninstall it and install again to change them\n", m.Guard)
+	}
+	return nil
+}
 func Apply(o Options) error {
 	if o.Out == nil {
 		o.Out = io.Discard
@@ -424,6 +448,9 @@ func Apply(o Options) error {
 			if all[idx].Wrapped != h.Raw {
 				_, _ = fmt.Fprintf(o.Out, "edited wrapped handler %s: left unchanged\n", all[idx].Guard)
 				continue
+			}
+			if err = warnChangedOptions(o, h, all[idx], args, binary); err != nil {
+				return err
 			}
 			if args[0] == binary {
 				_, _ = fmt.Fprintf(o.Out, "already wrapped %s\n", all[idx].Guard)

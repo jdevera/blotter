@@ -594,3 +594,58 @@ func TestManifestsSurviveReformatting(t *testing.T) {
 		t.Fatal(len(all), err)
 	}
 }
+func TestChangedOptionsAreReported(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			dir, o := isolated(t)
+			o.Harness = harness
+			p := writeSettings(t, dir)
+			if harness == "codex" {
+				p = filepath.Join(dir, ".codex", "hooks.json")
+				os.MkdirAll(filepath.Dir(p), 0700)
+				os.WriteFile(p, []byte(vaultSettings), 0600)
+			}
+			o.Binary = filepath.Join(dir, "blotter")
+			if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			o.FailOpen = []string{"tmux"}
+			if err := Apply(o); err != nil {
+				t.Fatal(err)
+			}
+			installed, _ := os.ReadFile(p)
+			run := func(change func(*Options)) string {
+				t.Helper()
+				next := o
+				change(&next)
+				out := &bytes.Buffer{}
+				next.Out = out
+				if err := Apply(next); err != nil {
+					t.Fatal(err)
+				}
+				if b, _ := os.ReadFile(p); !bytes.Equal(b, installed) {
+					t.Fatal("rewrote a wrapped handler")
+				}
+				return out.String()
+			}
+			if out := run(func(*Options) {}); strings.Contains(out, "warning:") {
+				t.Fatalf("same options warned:\n%s", out)
+			}
+			for name, change := range map[string]func(*Options){
+				"timeout": func(o *Options) { o.Timeout = 9 },
+				"record":  func(o *Options) { o.Record = "hash" },
+				"db":      func(o *Options) { o.WrapDB = "/elsewhere.db" },
+			} {
+				if out := run(change); strings.Count(out, "wrapped with different options") != 3 {
+					t.Errorf("%s: want a warning per handler:\n%s", name, out)
+				}
+			}
+			if harness == "claude" {
+				out := run(func(o *Options) { o.FailOpen = nil })
+				if !strings.Contains(out, "AskUserQuestion-3 is wrapped with different options") || strings.Count(out, "different options") != 1 {
+					t.Errorf("fail-open change:\n%s", out)
+				}
+			}
+		})
+	}
+}

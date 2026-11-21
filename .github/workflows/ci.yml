@@ -27,6 +27,8 @@ jobs:
           go-version-file: go.mod
       - run: go build ./...
       - run: go test -race ./...
+      - name: Report wrap benchmark
+        run: go test -run '^$' -bench BenchmarkWrapPass -benchtime=1s -count=1 .
       - name: Check four release targets without cgo
         shell: bash
         run: |

@@ -17,7 +17,7 @@ run = "go test -race ./..."
 
 [tasks.bench]
 description = "Measure wrap overhead"
-run = "go test -run TestWrapMedianOverhead -bench BenchmarkWrapPass -benchmem -v ."
+run = "go test -tags=performance -run TestWrapMedianOverhead -bench BenchmarkWrapPass -benchmem -v ."
 
 [tasks.lint]
 description = "Run static checks"
@@ -25,7 +25,7 @@ run = "golangci-lint run ./..."
 
 [tasks.fmt]
 description = "Format Go source"
-run = "gofmt -w main.go integration_test.go internal"
+run = "gofmt -w main.go integration_test.go performance_test.go internal"
 
 [tasks."release:check"]
 description = "Validate release configuration"

@@ -284,7 +284,7 @@ misclassify commands; blotter records their results, not calls they failed to ca
 ```sh
 go test ./...
 go test -race ./...
-go test -run TestWrapMedianOverhead -bench BenchmarkWrapPass -v .
+go test -tags=performance -run TestWrapMedianOverhead -bench BenchmarkWrapPass -v .
 golangci-lint run ./...
 python3 scripts/generate-codex-fixtures.py
 goreleaser check
@@ -301,10 +301,12 @@ reports a skip when a sandbox forbids binding a local socket. Hash fixtures are
 captured from the Rust engine itself and include a symlinked hooks file, empty
 matcher, status message, context limits, async and zero timeout.
 
-The median-overhead assertion applies to Apple Silicon and compares the built
-binary with the same immediate guard run directly. Other hardware still runs
-the functional tests. CI tests macOS and Linux, runs static/race checks, and builds
-darwin/linux for amd64/arm64 with CGO disabled.
+The `performance` test tag enables the strict 15 ms median-overhead assertion
+on Apple Silicon, comparing the built binary with the same guard run directly.
+Run it on a dedicated machine; shared-runner process scheduling makes absolute
+latency checks unreliable. CI reports benchmark measurements, runs functional
+and race checks on macOS and Linux, and builds darwin/linux for amd64/arm64
+with CGO disabled.
 
 The tag-triggered release workflow runs CI, injects `main.version`, publishes
 archives and checksums, and generates `jdevera/tap/blotter` with GoReleaser v2.

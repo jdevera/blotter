@@ -16,6 +16,7 @@ Single Go CLI. `main.go` is the module-root executable; behavior lives in
 ## Verification
 
 `mise run build`, `mise run test`, `mise run lint`.
+`mise run bench` enforces the 15 ms median target on a dedicated Apple Silicon machine.
 Use isolated HOME/XDG/CODEX_HOME directories for tests; never edit live hooks.
 Wrap must preserve guard output and status even when storage fails. All config
 edits must be reversible, preserve unrelated bytes, and detect concurrent edits.

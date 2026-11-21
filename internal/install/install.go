@@ -208,14 +208,12 @@ func BinaryPath(path string) (string, error) {
 	}
 	return filepath.Abs(path)
 }
-func put(raw []byte, path string, value any) ([]byte, error) { return sjson.SetBytes(raw, path, value) }
 func putRaw(raw []byte, path, value string) ([]byte, error) {
 	// SetRaw's default path compacts the replacement. Optimistic replacement
 	// preserves the saved object's internal formatting verbatim.
 	return sjson.SetRawBytesOptions(raw, path, []byte(value), &sjson.Options{Optimistic: true})
 }
 func prepareWrapped(h handler, o Options, binary, name string) (string, bool, error) {
-	raw := []byte(h.Raw)
 	result := h.result()
 	args := []string{"wrap", "--harness", o.Harness, "--guard", name}
 	if o.WrapDB != "" {
@@ -253,24 +251,23 @@ func prepareWrapped(h handler, o Options, binary, name string) (string, bool, er
 			args = append(args, words...)
 		}
 	}
+	var set []member
+	var remove []string
 	if o.Harness == "claude" {
-		raw, err = put(raw, "command", binary)
-		if err == nil {
-			raw, err = put(raw, "args", args)
-		}
-		if err == nil && !o.NoFailClosed && !match(h.Command, o.FailOpen) {
-			raw, err = put(raw, "onFailure", "block")
-		}
-		if err == nil && match(h.Command, o.FailOpen) {
-			raw, err = sjson.DeleteBytes(raw, "onFailure")
+		set = append(set, member{"command", binary}, member{"args", args})
+		if match(h.Command, o.FailOpen) {
+			remove = append(remove, "onFailure")
+		} else if !o.NoFailClosed {
+			set = append(set, member{"onFailure", "block"})
 		}
 	} else {
-		raw, err = put(raw, "command", guard.ShellJoin(append([]string{binary}, args...)))
+		set = append(set, member{"command", guard.ShellJoin(append([]string{binary}, args...))})
 	}
-	if err == nil && o.Timeout > 0 {
-		raw, err = put(raw, "timeout", o.Timeout)
+	if o.Timeout > 0 {
+		set = append(set, member{"timeout", o.Timeout})
 	}
-	return string(raw), shell, err
+	next, err := editObject(h.Raw, set, remove...)
+	return next, shell, err
 }
 func Apply(o Options) error {
 	if o.Out == nil {
@@ -412,12 +409,11 @@ func Apply(o Options) error {
 				continue
 			}
 			args[0] = binary
-			next := []byte(h.Raw)
-			if o.Harness == "claude" {
-				next, err = put(next, "command", binary)
-			} else {
-				next, err = put(next, "command", guard.ShellJoin(args))
+			command := binary
+			if o.Harness == "codex" {
+				command = guard.ShellJoin(args)
 			}
+			next, err := editObject(h.Raw, []member{{"command", command}})
 			if err != nil {
 				return err
 			}
@@ -426,7 +422,7 @@ func Apply(o Options) error {
 				if e != nil {
 					return e
 				}
-				newHash, e := CodexHash(h.Matcher, string(next))
+				newHash, e := CodexHash(h.Matcher, next)
 				if e != nil {
 					return e
 				}
@@ -441,11 +437,11 @@ func Apply(o Options) error {
 					}
 				}
 			}
-			settings.After, err = putRaw(settings.After, h.Path, string(next))
+			settings.After, err = putRaw(settings.After, h.Path, next)
 			if err != nil {
 				return err
 			}
-			all[idx].Wrapped = string(next)
+			all[idx].Wrapped = next
 			changed = true
 			_, _ = fmt.Fprintf(o.Out, "updated blotter path for %s\n", all[idx].Guard)
 			continue

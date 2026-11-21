@@ -420,3 +420,62 @@ func TestWrapperFlagsEndAtGuard(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallFollowsHandlerLayout(t *testing.T) {
+	const settings = `{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$TMUX_PANE\" ] && tmux display-message hi 2>/dev/null || true"
+          }
+        ]
+      },
+      {"matcher": "Bash", "hooks": [{"type":"command","command":"./guard.sh"}]}
+    ]
+  }
+}
+`
+	dir, o := isolated(t)
+	p := writeSettings(t, dir)
+	if err := os.WriteFile(p, []byte(settings), 0600); err != nil {
+		t.Fatal(err)
+	}
+	o.Binary = filepath.Join(dir, "blotter")
+	if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(p)
+	text := string(raw)
+	for _, want := range []string{
+		"            \"command\": \"" + o.Binary + "\",\n            \"args\": [\n              \"wrap\",\n",
+		"\"[ -n \\\"$TMUX_PANE\\\" ] && tmux display-message hi 2>/dev/null || true\"\n            ],\n            \"onFailure\": \"block\"\n          }\n",
+		`{"type":"command","command":"` + o.Binary + `","args":["wrap","--harness","claude","--guard","guard","--shell-words","--","./guard.sh"],"onFailure":"block"}`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, `\u00`) || !json.Valid(raw) {
+		t.Fatalf("escaped or invalid JSON:\n%s", text)
+	}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := os.ReadFile(p); !bytes.Equal(again, raw) {
+		t.Fatal("not idempotent")
+	}
+	o.Uninstall = true
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	if restored, _ := os.ReadFile(p); string(restored) != settings {
+		t.Fatalf("round trip changed bytes:\n%s", restored)
+	}
+}

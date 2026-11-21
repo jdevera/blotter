@@ -384,6 +384,7 @@ func TestSignalDuringPipeDrain(t *testing.T) {
 	}
 	// Let the main process exit while its descendant retains stdout/stderr.
 	time.Sleep(30 * time.Millisecond)
+	start := time.Now()
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
@@ -391,6 +392,10 @@ func TestSignalDuringPipeDrain(t *testing.T) {
 	e, ok := err.(*exec.ExitError)
 	if !ok || e.ExitCode() != 129 || out.String() != "ready" || stderr.Len() != 0 {
 		t.Fatalf("status=%v out=%q err=%q", err, out.String(), stderr.String())
+	}
+	// The descendant exits on TERM, so blotter must not wait out the KILL grace.
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("took %v after the group exited", elapsed)
 	}
 }
 

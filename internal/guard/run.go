@@ -20,6 +20,22 @@ type Result struct {
 
 type waited struct{ duration time.Duration }
 
+// killGrace is how long a signalled guard's process group has to exit after
+// TERM before it gets KILL.
+const killGrace = 2 * time.Second
+
+// awaitGroup returns once the process group has no members, sending KILL if
+// any remain at the deadline.
+func awaitGroup(pgid int, deadline time.Time) {
+	for syscall.Kill(-pgid, 0) == nil {
+		if !time.Now().Before(deadline) {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func Run(args []string, input []byte) Result {
 	var result Result
 	signals := make(chan os.Signal, 4)
@@ -76,21 +92,17 @@ func Run(args []string, input []byte) Result {
 	case state = <-done:
 	case interrupted = <-signals:
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		timer := time.NewTimer(2 * time.Second)
-		expired := false
+		deadline := time.Now().Add(killGrace)
+		timer := time.NewTimer(killGrace)
 		select {
 		case state = <-done:
 		case <-timer.C:
-			expired = true
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			state = <-done
 		}
-		// The main process may exit while a descendant ignores TERM.
-		if !expired && syscall.Kill(-cmd.Process.Pid, 0) == nil {
-			<-timer.C
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
 		timer.Stop()
+		// The main process may exit while a descendant ignores TERM.
+		awaitGroup(cmd.Process.Pid, deadline)
 	}
 	_ = inW.Close()
 	result.Duration = state.duration
@@ -110,11 +122,7 @@ func Run(args []string, input []byte) Result {
 		case sig := <-signals:
 			result.RC = 128 + int(sig.(syscall.Signal))
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			if syscall.Kill(-cmd.Process.Pid, 0) == nil {
-				deadline := time.NewTimer(2 * time.Second)
-				<-deadline.C
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			}
+			awaitGroup(cmd.Process.Pid, time.Now().Add(killGrace))
 		case e := <-copied:
 			pending--
 			if e != nil && result.CaptureErr == nil {

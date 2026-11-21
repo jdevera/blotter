@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jdevera/blotter/internal/store"
 )
@@ -647,5 +648,39 @@ func TestChangedOptionsAreReported(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+func TestDoctorReportsPastEventsAsCounts(t *testing.T) {
+	_, o := isolated(t)
+	t.Setenv("PATH", t.TempDir()) // no claude, codex or guards
+	if err := os.MkdirAll(store.StateDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	ts := func(d time.Duration) string { return store.Timestamp(now.Add(-d)) }
+	log := strings.Join([]string{
+		ts(10*24*time.Hour) + " not-logged demo guard demo logging: too old",
+		ts(time.Hour) + " not-logged demo guard demo logging: context deadline exceeded",
+		ts(time.Minute) + " not-logged other guard other logging: database is locked",
+		ts(time.Hour) + " background bg guard bg pipe capture: exec: WaitDelay expired before I/O complete",
+		ts(time.Minute) + " background bg guard bg pipe capture: exec: WaitDelay expired before I/O complete",
+		ts(time.Minute) + " guard old-format logging: locked",
+	}, "\n") + "\n"
+	if err := os.WriteFile(store.DiagnosticLogs()[1], []byte(log), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	healthy, err := Doctor(o.DB, t.TempDir(), &out)
+	if err != nil || !healthy {
+		t.Fatalf("%v %t\n%s", err, healthy, &out)
+	}
+	for _, want := range []string{
+		"info 2 hits not logged in the last 7 days; latest: guard other logging: database is locked\n",
+		"info guard bg left a background process holding its output 2 times in the last 7 days\n",
+		"info 1 other diagnostic in the last 7 days; latest: guard old-format logging: locked\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, &out)
+		}
 	}
 }

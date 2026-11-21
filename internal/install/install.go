@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -778,6 +779,8 @@ func uninstall(o Options, settings, config change, handlers []handler, all []Man
 
 var versionRE = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
+var errClaudeUnverified = errors.New("could not verify Claude version")
+
 // claudeVersion returns the installed Claude Code version when it supports
 // onFailure, or an empty version when running as root skips the check.
 func claudeVersion() (string, error) {
@@ -788,11 +791,11 @@ func claudeVersion() (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "claude", "--version").Output()
 	if err != nil {
-		return "", fmt.Errorf("could not verify Claude version: %w", err)
+		return "", fmt.Errorf("%w: %v", errClaudeUnverified, err)
 	}
 	m := versionRE.FindStringSubmatch(string(out))
 	if len(m) != 4 {
-		return "", fmt.Errorf("unrecognized Claude version")
+		return "", fmt.Errorf("%w: unrecognized output %q", errClaudeUnverified, strings.TrimSpace(string(out)))
 	}
 	v := []int{}
 	for _, p := range m[1:] {

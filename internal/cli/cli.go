@@ -79,20 +79,30 @@ func Run(args []string, version string, in io.Reader, out, stderr io.Writer) (co
 	root.SetErr(stderr)
 	root.SetArgs(args)
 	root.PersistentFlags().StringVar(&a.db, "db", "", "database path (or BLOTTER_DB)")
+	root.SetFlagErrorFunc(flagError)
 	root.AddCommand(a.wrap(), a.record(), a.ls(), a.show(), a.stats(), a.canary(), a.installCommand(false), a.installCommand(true), a.backups(), a.doctor())
-	if err := root.Execute(); err != nil {
-		var exit statusError
-		if errors.As(err, &exit) {
-			return int(exit)
-		}
-		if wrapping {
-			_, _ = fmt.Fprintf(stderr, "BLOCKED: blotter could not run guard %s: %v\n", guardName, err)
-			return 2
-		}
-		_, _ = fmt.Fprintf(stderr, "blotter: %v\n", err)
-		return 1
+	cmd, err := root.ExecuteC()
+	if err == nil {
+		return 0
 	}
-	return 0
+	var exit statusError
+	if errors.As(err, &exit) {
+		return int(exit)
+	}
+	if wrapping {
+		_, _ = fmt.Fprintf(stderr, "BLOCKED: blotter could not run guard %s: %v\n", guardName, err)
+		return 2
+	}
+	var usage usageError
+	switch {
+	case errors.As(err, &usage):
+		_, _ = fmt.Fprintf(stderr, "blotter: %v\nUsage: %s\nRun '%s --help' for details.\n", err, cmd.UseLine(), cmd.CommandPath())
+	case strings.HasPrefix(err.Error(), "unknown command"):
+		_, _ = fmt.Fprintf(stderr, "blotter: %s\nRun 'blotter --help' to list commands.\n", strings.TrimRight(err.Error(), "\n"))
+	default:
+		_, _ = fmt.Fprintf(stderr, "blotter: %v\n", err)
+	}
+	return 1
 }
 func (a *app) open() (*store.Store, error) {
 	return store.Open(context.Background(), store.DBPath(a.db))
@@ -272,11 +282,16 @@ func (a *app) record() *cobra.Command {
 	var name, harness, outcome, payload, project, session, event string
 	var rc int
 	c := &cobra.Command{Use: "record", Short: "Record an outcome from a script or another harness", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		if name == "" || harness == "" || !store.ValidOutcome(outcome) {
-			return fmt.Errorf("--guard, --harness and a valid --outcome are required")
+		switch {
+		case name == "":
+			return usagef("--guard is required")
+		case harness == "":
+			return usagef("--harness is required")
+		case rc < 0 || rc > 255:
+			return usagef("--rc must be between 0 and 255, not %d", rc)
 		}
-		if rc < 0 || rc > 255 {
-			return fmt.Errorf("--rc must be between 0 and 255")
+		if err := oneOf("--outcome", outcome, store.Outcomes...); err != nil {
+			return err
 		}
 		var raw []byte
 		var err error
@@ -341,16 +356,16 @@ func (a *app) ls() *cobra.Command {
 		var err error
 		f.Since, err = store.Since(since, time.Now())
 		if err != nil {
-			return err
+			return usageError{err}
 		}
 		if f.Limit < 1 {
-			return fmt.Errorf("--limit must be positive")
+			return usagef("--limit must be positive, not %d", f.Limit)
 		}
 		if outcomes != "" {
 			f.Outcomes = strings.Split(outcomes, ",")
 			for _, o := range f.Outcomes {
-				if !store.ValidOutcome(o) {
-					return fmt.Errorf("invalid outcome %q", o)
+				if err = oneOf("--outcome", o, store.Outcomes...); err != nil {
+					return err
 				}
 			}
 		}
@@ -412,10 +427,10 @@ func clean(s string) string {
 	}, s)
 }
 func (a *app) show() *cobra.Command {
-	return &cobra.Command{Use: "show <id>", Short: "Show one complete hit", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "show <id>", Short: "Show one complete hit", Args: exactlyOne("show takes one hit id; blotter ls lists them"), RunE: func(_ *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
-			return err
+			return usagef("%q is not a hit id; blotter ls lists them", args[0])
 		}
 		s, err := a.open()
 		if err != nil {
@@ -432,15 +447,21 @@ func (a *app) show() *cobra.Command {
 		return a.json(h)
 	}}
 }
+
+var statGroupings = []string{"guard", "day", "guard,day"}
+
 func (a *app) stats() *cobra.Command {
 	var f store.Filter
 	var since, by string
 	var asJSON bool
 	c := &cobra.Command{Use: "stats", Short: "Count outcomes by guard and/or UTC day", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		if err := oneOf("--by", by, statGroupings...); err != nil {
+			return err
+		}
 		var err error
 		f.Since, err = store.Since(since, time.Now())
 		if err != nil {
-			return err
+			return usageError{err}
 		}
 		s, err := a.open()
 		if err != nil {
@@ -544,7 +565,25 @@ func (a *app) installCommand(uninstall bool) *cobra.Command {
 		name = "uninstall"
 		short = "Restore original hook handlers"
 	}
-	c := &cobra.Command{Use: name + " claude|codex", Short: short, Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: name + " claude|codex", Short: short, Args: exactlyOne(name + " takes one harness: claude or codex"), RunE: func(_ *cobra.Command, args []string) error {
+		if err := oneOf("harness", args[0], "claude", "codex"); err != nil {
+			return err
+		}
+		scopes := []string{"user", "project", "local"}
+		if args[0] == "codex" {
+			scopes = scopes[:2] // Codex has no local settings file.
+		}
+		if err := oneOf("--scope", o.Scope, scopes...); err != nil {
+			return err
+		}
+		if !uninstall {
+			if err := oneOf("--record", o.Record, "full", "hash"); err != nil {
+				return err
+			}
+			if o.Timeout < 0 {
+				return usagef("--timeout must be positive, not %d", o.Timeout)
+			}
+		}
 		o.Harness = args[0]
 		o.Uninstall = uninstall
 		o.DB = store.DBPath(a.db)

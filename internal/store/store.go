@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -461,13 +462,11 @@ func Since(value string, now time.Time) (string, error) {
 	}
 	return Timestamp(now.Add(-d)), nil
 }
-func ValidOutcome(s string) bool {
-	switch s {
-	case "block", "error", "ask", "pass", "canary":
-		return true
-	}
-	return false
-}
+
+// Outcomes are the recorded results of a guard run.
+var Outcomes = []string{"block", "error", "ask", "pass", "canary"}
+
+func ValidOutcome(s string) bool { return slices.Contains(Outcomes, s) }
 
 type Canary struct {
 	Token   string `json:"token"`

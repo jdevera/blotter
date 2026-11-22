@@ -86,3 +86,30 @@ func TestListedIDsWorkWithShow(t *testing.T) {
 		t.Fatal(shown)
 	}
 }
+func TestUsageErrorsExplainThemselves(t *testing.T) {
+	t.Setenv("BLOTTER_DB", filepath.Join(t.TempDir(), "blotter.db"))
+	for _, tt := range []struct {
+		args       []string
+		want, line string
+	}{
+		{[]string{"show"}, "blotter: show takes one hit id; blotter ls lists them", "Usage: blotter show <id> [flags]"},
+		{[]string{"show", "abc"}, `blotter: "abc" is not a hit id; blotter ls lists them`, "Usage: blotter show <id> [flags]"},
+		{[]string{"install", "claudee"}, `blotter: harness must be claude or codex, not "claudee"`, "Usage: blotter install claude|codex [flags]"},
+		{[]string{"install", "codex", "--scope", "local"}, `blotter: --scope must be user or project, not "local"`, "Usage: blotter install claude|codex [flags]"},
+		{[]string{"ls", "--limit", "abc"}, `blotter: invalid argument "abc" for "--limit" flag: not a number`, "Usage: blotter ls [flags]"},
+		{[]string{"ls", "--outcome", "blocked"}, `blotter: --outcome must be block, error, ask, pass or canary, not "blocked"`, "Usage: blotter ls [flags]"},
+		{[]string{"stats", "--by", "week"}, `blotter: --by must be guard, day or guard,day, not "week"`, "Usage: blotter stats [flags]"},
+		{[]string{"record", "--guard", "g", "--harness", "h"}, "blotter: --outcome is required: block, error, ask, pass or canary", "Usage: blotter record [flags]"},
+	} {
+		var out, stderr bytes.Buffer
+		code := Run(tt.args, "test", strings.NewReader(""), &out, &stderr)
+		lines := strings.Split(stderr.String(), "\n")
+		if code != 1 || len(lines) < 3 || lines[0] != tt.want || lines[1] != tt.line || !strings.HasPrefix(lines[2], "Run 'blotter ") {
+			t.Errorf("%q: exit %d\n%s", tt.args, code, &stderr)
+		}
+	}
+	var out, stderr bytes.Buffer
+	if code := Run([]string{"show", "99"}, "test", strings.NewReader(""), &out, &stderr); code != 1 || stderr.String() != "blotter: no hit with id 99\n" {
+		t.Errorf("runtime error printed usage: %q", &stderr)
+	}
+}

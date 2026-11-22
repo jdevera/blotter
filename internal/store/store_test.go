@@ -1,10 +1,13 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +127,38 @@ func TestTruncationKeepsUTF8(t *testing.T) {
 	}
 	if len(h.Stderr) != CaptureCap {
 		t.Fatalf("binary stderr cut to %d bytes", len(h.Stderr))
+	}
+}
+func TestHitEventJSON(t *testing.T) {
+	for _, tt := range []struct{ event, want string }{
+		{" {\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"a && b > c\"}}\n", `{"tool_name":"Bash","tool_input":{"command":"a && b > c"}}`},
+		{"", `null`},
+		{"{broken", `"{broken"`},
+		{"[1,2]", `"[1,2]"`},
+		{"42", `"42"`},
+		{"plain <text>", `"plain <text>"`},
+	} {
+		b, err := json.Marshal(Hit{ID: 7, Event: tt.event})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			ID    int64           `json:"id"`
+			Event json.RawMessage `json:"event"`
+		}
+		if err = json.Unmarshal(b, &got); err != nil || got.ID != 7 {
+			t.Fatalf("%s: %v", b, err)
+		}
+		var compact bytes.Buffer
+		if err = json.Compact(&compact, got.Event); err != nil {
+			t.Fatal(err)
+		}
+		// Go's json.Marshal escapes HTML in strings; compare decoded values.
+		var gotV, wantV any
+		json.Unmarshal(compact.Bytes(), &gotV)
+		json.Unmarshal([]byte(tt.want), &wantV)
+		if !reflect.DeepEqual(gotV, wantV) || bytes.Count(b, []byte(`"event"`)) != 1 {
+			t.Errorf("%q => %s", tt.event, b)
+		}
 	}
 }

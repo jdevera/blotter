@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdevera/blotter/internal/guard"
+	"github.com/jdevera/blotter/internal/install"
 	"github.com/jdevera/blotter/internal/store"
 )
 
@@ -146,6 +148,31 @@ func TestCompletions(t *testing.T) {
 	} {
 		if got := strings.Join(complete(tt.args...), " "); !strings.HasPrefix(got, tt.want) {
 			t.Errorf("%q: got %q want %q", tt.args, got, tt.want)
+		}
+	}
+}
+func TestStatusText(t *testing.T) {
+	var out bytes.Buffer
+	a := &app{out: &out}
+	home, _ := os.UserHomeDir()
+	project := filepath.Join(home, "src", "vault")
+	files := []install.FileStatus{
+		{Harness: "claude", Scope: "project", Path: filepath.Join(project, ".claude", "settings.json"), Exists: true, Hooks: []install.HookStatus{
+			{Line: 6, Matcher: "Bash", Command: "python3 hooks/block-sed.py", Wrapped: true, Guard: "block-sed", LastHit: &install.LastHit{TS: "2026-11-22T10:00:00.000Z", Outcome: "block"}},
+			{Line: 9, Command: "./notify.sh", WrapCommand: "blotter install claude --scope project --only ./notify.sh", WrapAlsoMatches: 1},
+		}},
+		{Harness: "codex", Scope: "user", Path: filepath.Join(home, ".codex", "hooks.json")},
+	}
+	a.printStatus(project, files, time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"project: ~/src/vault\n",
+		"claude project  ~/src/vault/.claude/settings.json  1 of 2 hooks wrapped\n",
+		"  block-sed  Bash      last hit 2h ago (block)\n    at ~/src/vault/.claude/settings.json:6\n    runs python3 hooks/block-sed.py\n",
+		"  unwrapped  any tool  ./notify.sh\n    at ~/src/vault/.claude/settings.json:9\n    wrap it: blotter install claude --scope project --only ./notify.sh\n    (this --only also matches 1 other unwrapped hook; add --dry-run to check)\n",
+		"codex  user     ~/.codex/hooks.json  no file\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, &out)
 		}
 	}
 }

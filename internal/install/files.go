@@ -327,7 +327,10 @@ func manifests(db *sql.DB) ([]Manifest, error) {
 	}
 	return out, rows.Err()
 }
-func readManifests(path string) ([]Manifest, error) {
+
+// openReadOnly opens an existing database without creating or migrating it;
+// it returns nil when there is no database yet.
+func openReadOnly(path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
@@ -340,8 +343,11 @@ func readManifests(path string) ([]Manifest, error) {
 	u := url.URL{Scheme: "file", Path: abs}
 	q := url.Values{"mode": []string{"ro"}, "_pragma": []string{"busy_timeout(250)"}}
 	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite", u.String())
-	if err != nil {
+	return sql.Open("sqlite", u.String())
+}
+func readManifests(path string) ([]Manifest, error) {
+	db, err := openReadOnly(path)
+	if db == nil || err != nil {
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()

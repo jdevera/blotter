@@ -84,6 +84,22 @@ Installation warns for each command using this shell fallback.
 `config.toml` are unsupported in v1; move them to `hooks.json`. Trust tables in
 `[hooks.state]` are supported and do not count as inline handlers.
 
+## Check what is wrapped
+
+```sh
+blotter status
+blotter status --dir ~/src/vault --json
+```
+
+`status` lists every hook file that applies when an agent works in the
+directory: its Claude project and local settings, its Codex project hooks and
+your user-level files for both. Each PreToolUse command hook is shown with its
+matcher and its location as `file:line`. A wrapped hook shows its guard name,
+the original command and its most recent hit; an unwrapped one shows the
+`blotter install` command that wraps it. `status` changes nothing, never
+creates the database, runs no other program and exits 0 unless it fails; use
+`doctor` to check health.
+
 ## Inspect hits
 
 ```sh

@@ -81,7 +81,7 @@ func Run(args []string, version string, in io.Reader, out, stderr io.Writer) (co
 	root.SetArgs(args)
 	root.PersistentFlags().StringVar(&a.db, "db", "", "database path (or BLOTTER_DB)")
 	root.SetFlagErrorFunc(flagError)
-	root.AddCommand(a.wrap(), a.record(), a.ls(), a.show(), a.stats(), a.canary(), a.installCommand(false), a.installCommand(true), a.backups(), a.doctor())
+	root.AddCommand(a.wrap(), a.record(), a.ls(), a.show(), a.stats(), a.canary(), a.installCommand(false), a.installCommand(true), a.backups(), a.doctor(), a.status())
 	cmd, err := root.ExecuteC()
 	if err == nil {
 		return 0

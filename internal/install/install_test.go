@@ -684,3 +684,60 @@ func TestDoctorReportsPastEventsAsCounts(t *testing.T) {
 		}
 	}
 }
+func TestStatusLocatesHooksAndSuggestsWrapping(t *testing.T) {
+	dir, o := isolated(t)
+	p := writeSettings(t, dir)
+	o.Binary = filepath.Join(dir, "blotter")
+	if err := os.WriteFile(o.Binary, []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	o.Only = []string{"block-sed"}
+	if err := Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(context.Background(), o.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Insert(context.Background(), store.Hit{TS: "2026-11-22T10:00:00.000Z", Guard: "block-sed", Harness: "claude", Outcome: "block"})
+	s.Close()
+	files, err := Status(o.DB, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// HOME and CODEX_HOME are dir itself, so each user file is also the
+	// project file and is reported once.
+	if len(files) != 3 || files[0].Path != p || files[0].Scope != "project" || !files[0].Exists {
+		t.Fatalf("%+v", files)
+	}
+	hooks := files[0].Hooks
+	if len(hooks) != 3 {
+		t.Fatalf("%+v", hooks)
+	}
+	raw, _ := os.ReadFile(p)
+	for i, h := range hooks {
+		lines := strings.Split(string(raw), "\n")
+		if h.Line < 1 || !strings.Contains(lines[h.Line-1], `"type"`) {
+			t.Errorf("hook %d at line %d: %q", i, h.Line, lines[max(h.Line-1, 0)])
+		}
+	}
+	want := "blotter install claude --scope project --dir " + dir + " --only '\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-local-memory.sh'"
+	if hooks[0].Wrapped || hooks[0].WrapCommand != want {
+		t.Errorf("got %q\nwant %q", hooks[0].WrapCommand, want)
+	}
+	if !hooks[1].Wrapped || hooks[1].Guard != "block-sed" || hooks[1].Command != "python3 hooks/block-sed.py" || hooks[1].LastHit == nil || hooks[1].LastHit.Outcome != "block" || hooks[1].Problem != "" {
+		t.Errorf("%+v", hooks[1])
+	}
+	if hooks[2].WrapCommand != "blotter install claude --scope project --dir "+dir+" --only 'tmux display-message ready || true'" {
+		t.Errorf("%q", hooks[2].WrapCommand)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing.db")); !os.IsNotExist(err) {
+		t.Fatal("unexpected file")
+	}
+	if _, err := Status(filepath.Join(dir, "missing.db"), dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing.db")); !os.IsNotExist(err) {
+		t.Fatal("status created a database")
+	}
+}

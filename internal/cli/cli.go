@@ -372,8 +372,13 @@ func (a *app) ls() *cobra.Command {
 				width = w
 			}
 		}
+		// The id leads each row so it can be passed to show.
+		idWidth := 0
 		for _, h := range rows {
-			prefix := fmt.Sprintf("%s  %-20s %-6s %-16s ", h.TS, clean(h.Guard), h.Outcome, clean(filepath.Base(h.Project)))
+			idWidth = max(idWidth, len(strconv.FormatInt(h.ID, 10)))
+		}
+		for _, h := range rows {
+			prefix := fmt.Sprintf("%*d  %s  %-20s %-6s %-16s ", idWidth, h.ID, h.TS, clean(h.Guard), h.Outcome, clean(filepath.Base(h.Project)))
 			space := max(0, width-len([]rune(prefix)))
 			payload := []rune(clean(h.Payload))
 			if len(payload) > space {

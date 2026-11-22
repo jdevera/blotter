@@ -38,5 +38,6 @@ brews:
     license: MIT
     install: |
       bin.install "blotter"
+      generate_completions_from_executable(bin/"blotter", shell_parameter_format: :cobra)
     test: |
       system "#{bin}/blotter", "--version"

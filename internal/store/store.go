@@ -385,6 +385,24 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Hit, error) {
 	return hits, rows.Err()
 }
 
+// Guards lists the guard names that have recorded hits.
+func (s *Store) Guards(ctx context.Context) ([]string, error) {
+	rows, err := s.DB.QueryContext(ctx, "SELECT DISTINCT guard FROM hits ORDER BY guard")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []string{}
+	for rows.Next() {
+		var g string
+		if err = rows.Scan(&g); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 type Stat struct {
 	Guard   string `json:"guard,omitempty"`
 	Day     string `json:"day,omitempty"`

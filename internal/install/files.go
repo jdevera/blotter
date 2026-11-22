@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -345,6 +346,23 @@ func readManifests(path string) ([]Manifest, error) {
 	}
 	defer func() { _ = db.Close() }()
 	return manifests(db)
+}
+
+// InstalledGuards lists the guard names of installed wrappers, reading the
+// database only if it exists.
+func InstalledGuards(dbPath string) ([]string, error) {
+	all, err := readManifests(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	for _, m := range all {
+		if !slices.Contains(names, m.Guard) {
+			names = append(names, m.Guard)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 func saveManifests(tx *sql.Tx, all []Manifest) error {
 	if _, err := tx.Exec("DELETE FROM installs"); err != nil {

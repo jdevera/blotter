@@ -113,3 +113,39 @@ func TestUsageErrorsExplainThemselves(t *testing.T) {
 		t.Errorf("runtime error printed usage: %q", &stderr)
 	}
 }
+func TestCompletions(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "blotter.db")
+	t.Setenv("BLOTTER_DB", db)
+	complete := func(args ...string) []string {
+		t.Helper()
+		var out, stderr bytes.Buffer
+		if code := Run(append([]string{"__complete"}, args...), "test", strings.NewReader(""), &out, &stderr); code != 0 {
+			t.Fatal(args, code, &stderr)
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		return lines[:len(lines)-1] // drop the directive line
+	}
+	if got := complete("show", ""); len(got) != 0 {
+		t.Fatalf("ids without a database: %q", got)
+	}
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatal("completion created the database")
+	}
+	var out, stderr bytes.Buffer
+	Run([]string{"record", "--guard", "block-sed", "--harness", "claude", "--outcome", "block"}, "test", strings.NewReader(""), &out, &stderr)
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"install", ""}, "claude codex"},
+		{[]string{"install", "codex", "--scope", ""}, "user project"},
+		{[]string{"ls", "--outcome", "block,e"}, "block,error block,ask block,pass block,canary"},
+		{[]string{"stats", "--by", ""}, "guard day guard,day"},
+		{[]string{"ls", "--guard", ""}, "block-sed"},
+		{[]string{"show", ""}, "1\tblock-sed block "},
+	} {
+		if got := strings.Join(complete(tt.args...), " "); !strings.HasPrefix(got, tt.want) {
+			t.Errorf("%q: got %q want %q", tt.args, got, tt.want)
+		}
+	}
+}

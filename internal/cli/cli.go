@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -73,7 +74,7 @@ func Run(args []string, version string, in io.Reader, out, stderr io.Writer) (co
 			}
 		}
 	}()
-	root := &cobra.Command{Use: "blotter", Short: "Record agent guard blocks and failures locally", Version: version, SilenceUsage: true, SilenceErrors: true, CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true}}
+	root := &cobra.Command{Use: "blotter", Short: "Record agent guard blocks and failures locally", Version: version, SilenceUsage: true, SilenceErrors: true}
 	root.SetIn(in)
 	root.SetOut(out)
 	root.SetErr(stderr)
@@ -200,6 +201,10 @@ func (a *app) wrap() *cobra.Command {
 	f.StringVar(&shell, "sh", "", "command to run with /bin/sh -c")
 	f.StringVar(&log, "log", "block,error", "outcomes to log, or all")
 	f.StringVar(&privacy, "record", "full", "full or hash payload recording")
+	completeFlag(c, "harness", fixed(harnesses...))
+	completeFlag(c, "guard", a.guardNames)
+	completeFlag(c, "log", commaList(append(slices.Clone(store.Outcomes), "all")...))
+	completeFlag(c, "record", fixed("full", "hash"))
 	return c
 }
 func (a *app) passthrough(result guard.Result, h store.Hit, logs map[string]bool, privacy string) (err error) {
@@ -340,13 +345,20 @@ func (a *app) record() *cobra.Command {
 	f.StringVar(&session, "session", "", "session ID")
 	f.IntVar(&rc, "rc", 0, "return code")
 	f.StringVar(&event, "event-file", "", "event JSON file, or - for stdin")
+	completeFlag(c, "guard", a.guardNames)
+	completeFlag(c, "harness", fixed(harnesses...))
+	completeFlag(c, "outcome", fixed(store.Outcomes...))
+	completeFlag(c, "project", dirs)
 	return c
 }
-func filters(c *cobra.Command, f *store.Filter, since *string) {
+func (a *app) filters(c *cobra.Command, f *store.Filter, since *string) {
 	p := c.Flags()
 	p.StringVar(&f.Guard, "guard", "", "guard name")
 	p.StringVar(&f.Project, "project", "", "project directory (includes descendants)")
 	p.StringVar(since, "since", "", "duration or UTC date")
+	completeFlag(c, "guard", a.guardNames)
+	completeFlag(c, "project", dirs)
+	completeFlag(c, "since", fixed("12h", "1d", "7d", "2w"))
 }
 func (a *app) ls() *cobra.Command {
 	var f store.Filter
@@ -407,12 +419,14 @@ func (a *app) ls() *cobra.Command {
 		}
 		return nil
 	}}
-	filters(c, &f, &since)
+	a.filters(c, &f, &since)
 	p := c.Flags()
 	p.StringVar(&f.Harness, "harness", "", "harness name")
 	p.StringVar(&outcomes, "outcome", "", "comma-separated outcomes")
 	p.IntVar(&f.Limit, "limit", 50, "maximum rows")
 	p.BoolVar(&asJSON, "json", false, "print full rows as JSON")
+	completeFlag(c, "harness", fixed(harnesses...))
+	completeFlag(c, "outcome", commaList(store.Outcomes...))
 	return c
 }
 func clean(s string) string {
@@ -427,7 +441,7 @@ func clean(s string) string {
 	}, s)
 }
 func (a *app) show() *cobra.Command {
-	return &cobra.Command{Use: "show <id>", Short: "Show one complete hit", Args: exactlyOne("show takes one hit id; blotter ls lists them"), RunE: func(_ *cobra.Command, args []string) error {
+	return &cobra.Command{Use: "show <id>", Short: "Show one complete hit", Args: exactlyOne("show takes one hit id; blotter ls lists them"), ValidArgsFunction: a.hitIDs, RunE: func(_ *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
 			return usagef("%q is not a hit id; blotter ls lists them", args[0])
@@ -499,9 +513,10 @@ func (a *app) stats() *cobra.Command {
 		}
 		return nil
 	}}
-	filters(c, &f, &since)
+	a.filters(c, &f, &since)
 	c.Flags().StringVar(&by, "by", "guard", "guard, day or guard,day")
 	c.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	completeFlag(c, "by", fixed(statGroupings...))
 	return c
 }
 func (a *app) canary() *cobra.Command {
@@ -614,7 +629,14 @@ func (a *app) installCommand(uninstall bool) *cobra.Command {
 		f.StringVar(&o.Record, "record", "full", "full or hash recording")
 		f.BoolVar(&o.NoFailClosed, "no-fail-closed", false, "do not add Claude onFailure block")
 		f.BoolVar(&o.List, "list", false, "list handlers without writing")
+		completeFlag(c, "record", fixed("full", "hash"))
 	}
+	if uninstall {
+		completeFlag(c, "only", a.installedGuards)
+	}
+	completeFlag(c, "scope", scopes)
+	completeFlag(c, "dir", dirs)
+	c.ValidArgs = harnesses
 	return c
 }
 func (a *app) backups() *cobra.Command {
@@ -635,5 +657,6 @@ func (a *app) doctor() *cobra.Command {
 		return nil
 	}}
 	c.Flags().StringVar(&dir, "dir", ".", "project directory to inspect")
+	completeFlag(c, "dir", dirs)
 	return c
 }

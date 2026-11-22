@@ -23,6 +23,16 @@ go build -o dist/blotter .
 ./dist/blotter --version
 ```
 
+The Homebrew formula installs shell completions. Otherwise, load them from
+`blotter completion bash|zsh|fish|powershell`; for example, in `~/.zshrc`:
+
+```sh
+source <(blotter completion zsh)
+```
+
+Completions cover subcommands, flag values such as `--scope` and `--outcome`,
+guard names and hit ids from the local database.
+
 Preview changes before installing wrappers:
 
 ```sh

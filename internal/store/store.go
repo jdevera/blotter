@@ -218,6 +218,26 @@ type Hit struct {
 	Version    string `json:"blotter_version"`
 }
 
+// MarshalJSON writes the stored event as a JSON object when it is one, null
+// when it is empty (hash recording) and a string otherwise, so harness events
+// read as JSON while arbitrary recorded input is still shown as received.
+func (h Hit) MarshalJSON() ([]byte, error) {
+	type stored Hit
+	var event any
+	if text := bytes.TrimSpace([]byte(h.Event)); len(text) > 0 && text[0] == '{' && json.Valid(text) {
+		event = json.RawMessage(text)
+	} else if h.Event != "" {
+		event = h.Event
+	}
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(struct {
+		stored
+		Event any `json:"event"`
+	}{stored(h), event})
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), err
+}
 func FromEvent(raw []byte) Hit {
 	h := Hit{TS: Timestamp(time.Now()), Event: string(raw), Project: os.Getenv("CLAUDE_PROJECT_DIR")}
 	var event struct {

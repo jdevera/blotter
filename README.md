@@ -87,7 +87,8 @@ blotter doctor --dir .
 
 `ls` lists newest first and defaults to 50 rows (`--limit`). Filters also include
 `--harness`. Its JSON output is an array of full hit objects; `show` emits one
-full object. Terminal list output flattens control characters and clips payloads.
+full object. Terminal list output starts each row with the hit's id, the
+argument `show` takes, then flattens control characters and clips payloads.
 
 `stats` supports `--by guard` (default), `day` or `guard,day`. JSON contains
 `groups`, an array of group objects with `guard` and/or `day`, integer `block`,

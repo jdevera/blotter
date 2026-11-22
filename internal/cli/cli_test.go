@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,5 +63,26 @@ func TestShowUnknownID(t *testing.T) {
 	var out, stderr bytes.Buffer
 	if code := Run([]string{"show", "42"}, "test", strings.NewReader(""), &out, &stderr); code != 1 || stderr.String() != "blotter: no hit with id 42\n" {
 		t.Fatal(code, &stderr)
+	}
+}
+func TestListedIDsWorkWithShow(t *testing.T) {
+	t.Setenv("BLOTTER_DB", filepath.Join(t.TempDir(), "blotter.db"))
+	run := func(args ...string) string {
+		t.Helper()
+		var out, stderr bytes.Buffer
+		if code := Run(args, "test", strings.NewReader(""), &out, &stderr); code != 0 {
+			t.Fatal(args, code, &stderr)
+		}
+		return out.String()
+	}
+	for i := range 10 {
+		run("record", "--guard", fmt.Sprintf("g%d", i), "--harness", "custom", "--outcome", "block", "--payload", "p")
+	}
+	lines := strings.Split(strings.TrimSuffix(run("ls"), "\n"), "\n")
+	if len(lines) != 10 || !strings.HasPrefix(lines[0], "10  ") || !strings.HasPrefix(lines[9], " 1  ") {
+		t.Fatalf("ids missing or misaligned:\n%s", strings.Join(lines, "\n"))
+	}
+	if shown := run("show", strings.TrimSpace(lines[9][:2])); !strings.Contains(shown, `"guard": "g0"`) {
+		t.Fatal(shown)
 	}
 }
